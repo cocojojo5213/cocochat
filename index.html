@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Chat Streaming Demo</title>
+
+<!-- ===== 样式 ===== -->
+<style>
+:root {
+  --bg: #0f1217; --panel: #151a21; --panel-2: #1b222c;
+  --text: #e5e7eb; --muted: #a0a9b8; --accent: #6ea8fe;
+  --green: #22c55e; --red: #ef4444; --yellow: #f59e0b;
+  --code-bg: #0b0e13; --border: #243041;
+}
+* { box-sizing: border-box; }
+body { margin:0; background: var(--bg); color: var(--text); font: 14px/1.5 ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+.app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; max-width: 1100px; margin:0 auto; }
+
+/* header 样式 */
+header { padding:10px 16px; border-bottom:1px solid var(--border); background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+header .title { font-weight:700; letter-spacing:0.3px; }
+header .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+label { color: var(--muted); font-size: 12px; }
+input, textarea, select { background: var(--panel); border:1px solid var(--border); color: var(--text); border-radius:8px; padding:8px 10px; outline:none; transition: border 0.15s ease; }
+input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+input[type="number"] { width:90px; }
+.grow { flex:1 1 auto; min-width:200px; }
+.system-box { width:100%; min-height:60px; resize: vertical; }
+
+/* 聊天消息 */
+.chat { overflow-y:auto; padding:10px 16px 120px; }
+.msg { display:flex; gap:10px; margin:14px 0; align-items:flex-start; }
+.msg .avatar { width:28px; height:28px; border-radius:6px; background: var(--panel-2); display:grid; place-items:center; font-size:13px; color: var(--muted); flex:0 0 28px; }
+.msg.user .avatar { background:#213147; color:#b9d2ff; }
+.msg.assistant .avatar { background:#1f2c22; color:#a5f3c6; }
+.bubble { background: var(--panel); border:1px solid var(--border); padding:12px 14px; border-radius:10px; max-width:880px; overflow:hidden; white-space:pre-wrap; word-break:break-word; }
+.bubble.typing::after { content:" "; display:inline-block; width:8px; height:14px; background: var(--text); margin-left:2px; animation: blink 1s steps(1) infinite; vertical-align:-2px; }
+@keyframes blink { 50% { opacity:0; } }
+
+/* 代码高亮 */
+pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12.5px; line-height:1.5; }
+pre { background: var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:10px 12px; overflow:auto; }
+code.inline { background:#151a21; border:1px solid var(--border); padding:0 4px; border-radius:4px; }
+
+/* 输入栏 */
+.composer { position:fixed; left:0; right:0; bottom:0; background:linear-gradient(0deg, rgba(15,18,23,0.95), rgba(15,18,23,0.90)); backdrop-filter:blur(4px); border-top:1px solid var(--border); padding:10px 16px; }
+.composer .top { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
+.composer .bar { display:flex; gap:8px; align-items:flex-end; }
+.composer textarea { min-height:44px; max-height:200px; flex:1 1 auto; }
+
+/* 按钮 */
+button { background: var(--panel-2); color: var(--text); border:1px solid var(--border); border-radius:10px; padding:10px 14px; cursor:pointer; transition: transform .05s ease, background .2s ease, border .2s ease, opacity .2s ease; }
+button:hover { background:#232c3a; }
+button:active { transform: translateY(1px); }
+button.primary { background:#20324f; border-color:#315485; color:#cfe1ff; }
+button.stop { background:#3a1d20; border-color:#6b272d; color:#ffc7ce; }
+
+.muted { color: var(--muted); font-size:12px; }
+.row-gap { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+.toggle, .inline { display:inline-flex; gap:6px; align-items:center; cursor:pointer; }
+</style>
+</head>
+
+<body>
+<div class="app">
+  <header>
+    <div class="title">Chat Streaming Demo</div>
+    <div class="row">
+      <label>API Key</label>
+      <input id="apiKey" type="text" class="grow" placeholder="sk-..." />
+      <button id="saveKey">保存</button>
+    </div>
+    <div class="row">
+      <label>模型</label>
+      <select id="model">
+        <option value="gpt-5">gpt-5</option>
+        <option value="gpt-5-mini">gpt-5-mini</option>
+        <option value="gpt-5-nano">gpt-5-nano</option>
+      </select>
+      <label>最大输出tokens</label><input id="maxTokens" type="number" min="1" value="1024" />
+      <label>超时(秒)</label><input id="timeoutSec" type="number" min="1" value="60" />
+      <label class="toggle"><input id="syntaxHighlight" type="checkbox" /> 语法高亮(Prism)</label>
+    </div>
+    <div class="row" style="width:100%">
+      <label class="muted">系统提示词</label>
+      <textarea id="systemPrompt" class="system-box" placeholder="例如：你是一个助理，回答要简洁..."></textarea>
+    </div>
+  </header>
+
+  <main id="chat" class="chat"></main>
+
+  <div class="composer">
+    <div class="top row-gap">
+      <span class="muted">流式输出 + 取消/超时 已启用</span>
+      <span id="status" class="muted"></span>
+    </div>
+    <div class="bar">
+      <textarea id="input" class="grow" placeholder="输入你的问题，回车发送..." rows="2"></textarea>
+      <button id="send" class="primary">发送</button>
+      <button id="stop" class="stop" style="display:none;">停止生成</button>
+      <button id="clear">清空</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const el = {
+  chat: document.getElementById('chat'),
+  input: document.getElementById('input'),
+  send: document.getElementById('send'),
+  stop: document.getElementById('stop'),
+  clear: document.getElementById('clear'),
+  apiKey: document.getElementById('apiKey'),
+  saveKey: document.getElementById('saveKey'),
+  model: document.getElementById('model'),
+  temperature: document.getElementById('temperature'),
+  maxTokens: document.getElementById('maxTokens'),
+  timeoutSec: document.getElementById('timeoutSec'),
+  systemPrompt: document.getElementById('systemPrompt'),
+  syntaxHighlight: document.getElementById('syntaxHighlight'),
+  status: document.getElementById('status')
+};
+
+// 保存 API Key
+if (el.saveKey) {
+  el.saveKey.addEventListener('click', () => {
+    if (el.apiKey) {
+      localStorage.setItem('apiKey', el.apiKey.value);
+      alert('API Key 已保存！');
+    }
+  });
+}
+if (el.apiKey) el.apiKey.value = localStorage.getItem('apiKey') || '';
+
+// 添加消息
+function addMessage(role, content, typing = false) {
+  const msg = document.createElement('div');
+  msg.className = 'msg ' + role;
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  avatar.textContent = role === 'user' ? '👤' : '🤖';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble' + (typing ? ' typing' : '');
+  bubble.innerHTML = content;
+  msg.appendChild(avatar);
+  msg.appendChild(bubble);
+  if (el.chat) {
+    el.chat.appendChild(msg);
+    el.chat.scrollTop = el.chat.scrollHeight;
+  }
+  return bubble;
+}
+
+// 清空聊天
+if (el.clear) {
+  el.clear.addEventListener('click', () => { if (el.chat) el.chat.innerHTML = ''; });
+}
+
+let controller = null;
+
+// 回车发送 / Shift+Enter 换行
+if (el.input) {
+  el.input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (el.send) el.send.click();
+    }
+  });
+}
+
+// 发送消息
+if (el.send) {
+  el.send.addEventListener('click', async () => {
+    if (!el.input) return;
+    const prompt = el.input.value.trim();
+    if (!prompt) return;
+
+    addMessage('user', prompt);
+    el.input.value = '';
+    el.send.disabled = true;
+    if (el.stop) el.stop.style.display = 'inline-block';
+
+    try {
+      controller = new AbortController();
+      const bubble = addMessage('assistant', '', true);
+      await fetchStream(prompt, bubble, controller.signal);
+    } catch (err) {
+      console.error(err);
+      alert('出错: ' + (err.message || err));
+    } finally {
+      if (el.send) el.send.disabled = false;
+      if (el.stop) el.stop.style.display = 'none';
+    }
+  });
+}
+
+// 停止生成
+if (el.stop) {
+  el.stop.addEventListener('click', () => { controller?.abort(); });
+}
+
+// 流式请求 OpenAI API
+async function fetchStream(prompt, bubble, signal) {
+  if (!el.apiKey || !el.model) throw new Error('API Key 或模型未设置');
+  
+  const headers = {
+    'Authorization': 'Bearer ' + el.apiKey.value,
+    'Content-Type': 'application/json'
+  };
+
+  const systemContent = el.systemPrompt ? el.systemPrompt.value : '你是一个助理。';
+  const modelName = el.model.value;
+
+  // 某些模型只允许默认 temperature
+  let temperature = parseFloat(el.temperature?.value || 1);
+  if (modelName.startsWith('gpt-5') && temperature !== 1) temperature = 1;
+
+  const body = {
+    model: modelName,
+    messages: [
+      { role: 'system', content: systemContent },
+      { role: 'user', content: prompt }
+    ],
+    max_completion_tokens: parseInt(el.maxTokens?.value || 1024),
+    temperature: temperature,
+    stream: true
+  };
+
+  const timeout = parseInt(el.timeoutSec?.value || 60) * 1000;
+  const controllerTimeout = new AbortController();
+  const timer = setTimeout(() => controllerTimeout.abort(), timeout);
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal: controllerTimeout.signal
+  });
+
+  if (!res.ok) throw new Error(await res.text());
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let done = false;
+
+  while (!done) {
+    const { value, done: doneReading } = await reader.read();
+    done = doneReading;
+    const chunk = decoder.decode(value);
+    const lines = chunk.split(/\r?\n/).filter(line => line.trim() && line.startsWith('data: '));
+
+    for (const line of lines) {
+      const dataStr = line.replace(/^data: /, '');
+      if (dataStr === '[DONE]') continue;
+      try {
+        const data = JSON.parse(dataStr);
+        const content = data.choices[0].delta?.content || '';
+        bubble.innerHTML += content.replace(/\n/g, '<br>');
+      } catch (e) { console.warn('JSON 解析错误', e); }
+    }
+
+    if (el.chat) el.chat.scrollTop = el.chat.scrollHeight;
+  }
+
+  clearTimeout(timer);
+  bubble.classList.remove('typing');
+}
+</script>
+</body>
+</html>
