@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <title>Chat Streaming Demo (Fixed)</title>
 
 <style>
@@ -10,18 +10,44 @@
   --bg:#0f1217; --panel:#151a21; --panel-2:#1b222c;
   --text:#e5e7eb; --muted:#a0a9b8; --accent:#6ea8fe;
   --code-bg:#0b0e13; --border:#243041;
+  --safe-top: env(safe-area-inset-top);
+  --safe-bottom: env(safe-area-inset-bottom);
 }
+
 *{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;}
 body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 ui-sans-serif,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
-.app{display:grid;grid-template-rows:auto 1fr auto;height:100vh;max-width:1100px;margin:0 auto;}
-header{padding:10px 16px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
+a,button{-webkit-tap-highlight-color:transparent;}
+input,textarea,select{background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;outline:none;font-size:16px;}
+
+.app{
+  display:grid;
+  grid-template-rows:auto 1fr auto;
+  min-height:100dvh; /* iOS18 等现代设备 */
+  min-height:100vh;  /* 回退 */
+  max-width:1100px;
+  margin:0 auto;
+}
+
+header{
+  padding:calc(10px + var(--safe-top)) 16px 10px;
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);
+  display:flex;gap:12px;align-items:center;flex-wrap:wrap;
+}
 header .title{font-weight:700;}
 header .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
 label{color:var(--muted);font-size:12px;}
-input,textarea,select{background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;outline:none;}
 .grow{flex:1 1 auto;min-width:200px;}
 .system-box{width:100%;min-height:60px;resize:vertical;}
-.chat{overflow-y:auto;padding:10px 16px 120px;}
+
+.chat{
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
+  padding:10px 16px 12px;
+}
+
 .msg{display:flex;gap:10px;margin:14px 0;align-items:flex-start;}
 .msg .avatar{width:28px;height:28px;border-radius:6px;background:var(--panel-2);display:grid;place-items:center;font-size:13px;color:var(--muted);flex:0 0 28px;}
 .msg.user .avatar{background:#213147;color:#b9d2ff;}
@@ -29,10 +55,18 @@ input,textarea,select{background:var(--panel);border:1px solid var(--border);col
 .bubble{background:var(--panel);border:1px solid var(--border);padding:12px 14px;border-radius:10px;max-width:880px;white-space:pre-wrap;word-break:break-word;}
 .bubble.typing::after{content:" ";display:inline-block;width:8px;height:14px;background:var(--text);margin-left:2px;animation:blink 1s steps(1) infinite;vertical-align:-2px;}
 @keyframes blink{50%{opacity:0;}}
-.composer{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(0deg,rgba(15,18,23,0.95),rgba(15,18,23,0.90));backdrop-filter:blur(4px);border-top:1px solid var(--border);padding:10px 16px;}
+
+.composer{
+  position:sticky;bottom:0;z-index:5;
+  background:linear-gradient(0deg,rgba(15,18,23,0.95),rgba(15,18,23,0.90));
+  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+  border-top:1px solid var(--border);
+  padding:10px 16px calc(10px + var(--safe-bottom));
+}
 .composer .top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;}
 .composer .bar{display:flex;gap:8px;align-items:flex-end;}
 .composer textarea{min-height:44px;max-height:200px;flex:1 1 auto;}
+
 button{background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px 14px;cursor:pointer;}
 button.primary{background:#20324f;border-color:#315485;color:#cfe1ff;}
 button.stop{background:#3a1d20;border-color:#6b272d;color:#ffc7ce;}
@@ -72,7 +106,8 @@ button.stop{background:#3a1d20;border-color:#6b272d;color:#ffc7ce;}
       <span id="status" class="muted"></span>
     </div>
     <div class="bar">
-      <textarea id="input" class="grow" placeholder="输入你的问题，回车发送..." rows="2"></textarea>
+      <textarea id="input" class="grow" placeholder="输入你的问题，回车发送..." rows="2"
+        enterkeyhint="send" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
       <button id="send" class="primary">发送</button>
       <button id="stop" class="stop" style="display:none;">停止生成</button>
       <button id="clear">清空对话</button>
@@ -93,6 +128,8 @@ const el = {
   systemPrompt:document.getElementById('systemPrompt'),
   status:document.getElementById('status')
 };
+
+const isTouch = window.matchMedia('(pointer: coarse)').matches;
 
 // 保存和加载API Key
 if(el.saveKey){
@@ -116,7 +153,8 @@ function addMessage(role,content,typing=false){
   bubble.className='bubble'+(typing?' typing':'');
   bubble.textContent=content;
   msg.appendChild(avatar);msg.appendChild(bubble);
-  el.chat.appendChild(msg);el.chat.scrollTop=el.chat.scrollHeight;
+  el.chat.appendChild(msg);
+  el.chat.scrollTop=el.chat.scrollHeight;
   return bubble;
 }
 
@@ -141,7 +179,8 @@ let controller=null;
 let currentBubble=null;
 
 el.input.addEventListener('keydown',(e)=>{
-  if(e.key==='Enter'&&!e.shiftKey){
+  // 桌面端：Enter 发送；移动端：保留换行，点按钮发送
+  if(e.key==='Enter'&&!e.shiftKey&&!isTouch){
     e.preventDefault();
     el.send.click();
   }
@@ -183,7 +222,7 @@ el.send.addEventListener('click',async()=>{
     el.send.disabled=false;
     el.stop.style.display='none';
     el.input.disabled = false;
-    el.input.focus();
+    if (!isTouch) el.input.focus();
     if (currentBubble) currentBubble.classList.remove('typing');
     currentBubble = null;
   }
@@ -261,10 +300,8 @@ async function fetchStream(bubble, signal) {
       const {value, done} = await reader.read();
       if(done) break;
 
-      // 增量解码，拼接到缓冲
       buffer += decoder.decode(value, { stream: true });
 
-      // SSE 以换行分隔（常见是 \n\n），这里逐行处理，并将未完整行保留到 buffer
       const parts = buffer.split('\n');
       buffer = parts.pop() || '';
 
@@ -274,7 +311,7 @@ async function fetchStream(bubble, signal) {
         const line = raw.trim();
         if (!line || !line.startsWith('data:')) continue;
 
-        const dataStr = line.slice(5).trim(); // 去掉 'data:'
+        const dataStr = line.slice(5).trim();
         if (dataStr === '[DONE]') {
           hitDone = true;
           el.status.textContent = '完成';
@@ -285,7 +322,6 @@ async function fetchStream(bubble, signal) {
         try {
           data = JSON.parse(dataStr);
         } catch {
-          // 若仍解析失败，多半是半包，留待下次循环
           continue;
         }
 
@@ -306,7 +342,6 @@ async function fetchStream(bubble, signal) {
       if (hitDone) break;
     }
 
-    // 读完剩余缓冲的一行（极少数情况）
     const last = buffer.trim();
     if (last.startsWith('data:')) {
       const ds = last.slice(5).trim();
@@ -324,7 +359,6 @@ async function fetchStream(bubble, signal) {
 
   } catch (err) {
     if (err.name === 'AbortError') {
-      // 用户主动取消：保留已生成的内容
       el.status.textContent = '已停止生成';
     } else {
       throw err;
@@ -334,7 +368,6 @@ async function fetchStream(bubble, signal) {
     bubble.classList.remove('typing');
   }
 
-  // 保存助手回复到历史（即便被取消，也保留已生成部分）
   if (fullText) {
     messageHistory.push({role: 'assistant', content: fullText});
   }
